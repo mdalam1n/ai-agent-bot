@@ -20,7 +20,7 @@ def run_web_server():
 
 threading.Thread(target=run_web_server, daemon=True).start()
 
-# --- ২. Environment Variables & New Gemini Client ---
+# --- ২. Environment Variables & Gemini Client ---
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN", "").strip()
 GEMINI_KEY = os.environ.get("GEMINI_KEY", "").strip()
 
@@ -28,18 +28,24 @@ client = None
 if GEMINI_KEY:
     client = genai.Client(api_key=GEMINI_KEY)
 
-# --- ৩. AI Response Function ---
+# --- ৩. AI Response Function with Auto-Retry ---
 async def get_gemini_response(prompt):
     if not client:
         return "GEMINI_KEY পাওয়া যায়নি!"
-    try:
-        response = client.models.generate_content(
-            model='gemini-3.8-flash',
-            contents=prompt,
-        )
-        return response.text
-    except Exception as e:
-        return f"AI Error: {str(e)}"
+    
+    # ৩ বার চেষ্টা করার লুপ (503 High Demand এরর এড়াতে)
+    for attempt in range(3):
+        try:
+            response = client.models.generate_content(
+                model='gemini-3.8-flash',
+                contents=prompt,
+            )
+            return response.text
+        except Exception as e:
+            if "503" in str(e) and attempt < 2:
+                await asyncio.sleep(2) # ২ সেকেন্ড অপেক্ষা করে আবার চেষ্টা করবে
+                continue
+            return f"AI Error: {str(e)}"
 
 # --- ৪. Telegram Handlers ---
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
