@@ -4,7 +4,7 @@ import threading
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, ContextTypes
-import google.generativeai as genai
+from google import genai
 
 # --- ১. Render Port Server Setup ---
 class SimpleHTTPRequestHandler(BaseHTTPRequestHandler):
@@ -20,18 +20,23 @@ def run_web_server():
 
 threading.Thread(target=run_web_server, daemon=True).start()
 
-# --- ২. Environment Variables ---
+# --- ২. Environment Variables & New Gemini Client ---
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN", "").strip()
 GEMINI_KEY = os.environ.get("GEMINI_KEY", "").strip()
 
+client = None
 if GEMINI_KEY:
-    genai.configure(api_key=GEMINI_KEY)
-    gemini_model = genai.GenerativeModel('gemini-1.5-flash-latest')
+    client = genai.Client(api_key=GEMINI_KEY)
 
 # --- ৩. AI Response Function ---
 async def get_gemini_response(prompt):
+    if not client:
+        return "GEMINI_KEY পাওয়া যায়নি!"
     try:
-        response = gemini_model.generate_content(prompt)
+        response = client.models.generate_content(
+            model='gemini-2.5-flash',
+            contents=prompt,
+        )
         return response.text
     except Exception as e:
         return f"AI Error: {str(e)}"
