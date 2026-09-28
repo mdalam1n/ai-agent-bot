@@ -49,11 +49,11 @@ async def get_gemini_response(prompt):
 
 # --- ৪. Telegram Handlers ---
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("হ্যালো! আমি আপনার AI Assistant Agent। আমাকে যেকোনো প্রশ্ন করতে পারেন।")
+    await update.message.reply_text("হ্যালো! আমি আপনার এসিস্ট্যান্ট সোনা পাখি। আমাকে যেকোনো প্রশ্ন করতে পারেন।")
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_text = update.message.text
-    status_msg = await update.message.reply_text("🤖 AI Agent প্রসেস করছে...")
+    status_msg = await update.message.reply_text("🤖 সোনা পাখি চিন্তা করছে...")
     
     response_text = await get_gemini_response(user_text)
     
