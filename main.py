@@ -34,7 +34,7 @@ async def get_gemini_response(prompt):
         return "GEMINI_KEY পাওয়া যায়নি!"
     try:
         response = client.models.generate_content(
-            model='gemini-2.0-flash',
+            model='gemini-3.8-flash',
             contents=prompt,
         )
         return response.text
