@@ -26,7 +26,7 @@ GEMINI_KEY = os.environ.get("GEMINI_KEY", "").strip()
 
 if GEMINI_KEY:
     genai.configure(api_key=GEMINI_KEY)
-    gemini_model = genai.GenerativeModel('gemini-1.5-flash')
+    gemini_model = genai.GenerativeModel('gemini-1.5-flash-latest')
 
 # --- ৩. AI Response Function ---
 async def get_gemini_response(prompt):
@@ -46,7 +46,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     response_text = await get_gemini_response(user_text)
     
-    # parse_mode তুলে দেওয়া হয়েছে যাতে বিশেষ চিহ্নে ক্র্যাশ না করে
     await status_msg.edit_text(response_text)
 
 # --- ৫. Main Execution ---
