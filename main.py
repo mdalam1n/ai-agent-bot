@@ -125,13 +125,13 @@ async def handle_private_message(update: Update, context: ContextTypes.DEFAULT_T
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     if client:
-        user_chats[user_id] = client.chats.create(model='gemini-2.5-flash')
+        user_chats[user_id] = client.chats.create(model='gemini-3.6-flash')
     await update.message.reply_text("হ্যালো! আমি আপনার পার্সোনাল ও চ্যানেল অ্যাসিস্ট্যান্ট সোনা পাখি। আমি আগের কথাবাতাও মনে রাখতে পারি।")
 
 async def reset(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     if client:
-        user_chats[user_id] = client.chats.create(model='gemini-3.8-flash')
+        user_chats[user_id] = client.chats.create(model='gemini-3.6-flash')
     await update.message.reply_text("🔄 আমাদের আগের সব মেমোরি রিসেট করা হয়েছে!")
 
 # --- ৫. Main Execution ---
