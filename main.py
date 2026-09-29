@@ -60,7 +60,7 @@ async def generate_channel_review(title_text):
         return None
     
     prompt = f"""
-    তুমি একজন প্রফেশনাল মুভি ও সিরিজ বিশ্লেষক। নিচের নামটি বা ক্যাপশনটি একটি মুভি বা টিভি সিরিজ সংক্রান্ত:
+    তুমি একজন প্রফেশনাল মুভি ও সিরিজ বিশ্লেষক। নিচের নামটি বা বিবরণটি একটি মুভি বা টিভি সিরিজ সংক্রান্ত:
     "{title_text}"
 
     তুমি বাংলা ভাষায় নিচের নির্দিষ্ট ফরম্যাট অনুযায়ী সুন্দর ও আকর্ষণীয় একটি বিবরণ তৈরি করে দাও:
@@ -100,13 +100,12 @@ async def generate_channel_review(title_text):
 
 # --- ৪. Telegram Handlers ---
 
-# চ্যানেলে টেক্সট, ফটো বা মিডিয়া ক্যাপশন সহ যেকোনো পোস্ট এলে তা প্রসেস করবে
+# চ্যানেলে পোস্ট এলে পোস্টটি অটোমেটিক এডিট করে সম্পূর্ণ রিভিউ দিয়ে দেবে
 async def handle_channel_post(update: Update, context: ContextTypes.DEFAULT_TYPE):
     channel_post = update.channel_post
     if not channel_post:
         return
     
-    # টেক্সট অথবা ফটোর ক্যাপশন নেওয়া
     post_text = channel_post.text or channel_post.caption
     if not post_text:
         return
@@ -116,9 +115,15 @@ async def handle_channel_post(update: Update, context: ContextTypes.DEFAULT_TYPE
     
     if review_text:
         try:
-            await channel_post.reply_text(review_text)
-        except Exception as e:
-            print(f"Reply Error: {e}")
+            # যদি টেক্সট পোস্ট হয়, পোস্টটি এডিট করে পুরো রিভিউ বসিয়ে দেবে
+            if channel_post.text:
+                await channel_post.edit_text(review_text)
+            # যদি ছবি বা ক্যাপশন পোস্ট হয়
+            elif channel_post.caption:
+                await channel_post.edit_caption(caption=review_text[:1024])
+        except Exception:
+            # কোনো কারণে এডিট না হলে নতুন মেসেজ হিসেবে পাঠিয়ে দেবে
+            await context.bot.send_message(chat_id=channel_post.chat_id, text=review_text)
 
 async def handle_private_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
@@ -132,7 +137,7 @@ async def handle_private_message(update: Update, context: ContextTypes.DEFAULT_T
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     if client:
-        user_chats[user_id] = client.chats.create(model='gemini-2.6-flash')
+        user_chats[user_id] = client.chats.create(model='gemini-3.6-flash')
     await update.message.reply_text("হ্যালো! আমি আপনার পার্সোনাল ও চ্যানেল অ্যাসিস্ট্যান্ট সোনা পাখি।")
 
 async def reset(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -151,10 +156,10 @@ if __name__ == '__main__':
         app.add_handler(CommandHandler("start", start))
         app.add_handler(CommandHandler("reset", reset))
         
-        # চ্যানেলের টেক্সট ও মিডিয়া (ছবিসহ) পোস্ট ধরার ফিল্টার
+        # চ্যানেলের পোস্ট হ্যান্ডলার
         app.add_handler(MessageHandler(filters.ChatType.CHANNEL & (filters.TEXT | filters.CAPTION), handle_channel_post))
         
-        # পার্সোনাল প্রাইভেট চ্যাট হ্যান্ডলার
+        # প্রাইভেট চ্যাট হ্যান্ডলার
         app.add_handler(MessageHandler(filters.ChatType.PRIVATE & filters.TEXT & ~filters.COMMAND, handle_private_message))
         
         print("Bot is starting...")
