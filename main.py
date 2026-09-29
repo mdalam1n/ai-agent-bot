@@ -32,13 +32,13 @@ user_chats = {}
 
 # --- ৩. AI Functions ---
 
-# (ক) পার্সোনাল চ্যাটের উত্তর ও মেমোরি হ্যান্ডলার
+# (ক) পার্সোনাল চ্যাটের উত্তর ও মেমোরি হ্যান্ডলার (gemini-3.6-flash)
 async def get_personal_chat_response(user_id, prompt):
     if not client:
         return "GEMINI_KEY পাওয়া যায়নি!"
     
     if user_id not in user_chats:
-        user_chats[user_id] = client.chats.create(model='gemini-2.5-flash')
+        user_chats[user_id] = client.chats.create(model='gemini-3.6-flash')
     
     chat = user_chats[user_id]
 
@@ -54,7 +54,7 @@ async def get_personal_chat_response(user_id, prompt):
                 return "⚠️ এআই কোটা লিমিট শেষ বা সার্ভার ব্যস্ত। অনুগ্রহ করে কয়েক সেকেন্ড পর আবার চেষ্টা করুন।"
             return f"AI Error: {str(e)}"
 
-# (খ) চ্যানেলের জন্য অটো মুভি/সিরিজ রিভিউ জেনারেটর
+# (খ) চ্যানেলের জন্য অটো মুভি/সিরিজ রিভিউ জেনারেটর (gemini-3.6-flash)
 async def generate_channel_review(title_text):
     if not client:
         return None
@@ -88,7 +88,7 @@ async def generate_channel_review(title_text):
     for attempt in range(3):
         try:
             response = client.models.generate_content(
-                model='gemini-2.5-flash',
+                model='gemini-3.6-flash',
                 contents=prompt,
             )
             return response.text
