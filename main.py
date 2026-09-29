@@ -4,7 +4,7 @@ import threading
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, ContextTypes
-from google import genai
+import google.generativeai as genai
 
 # --- ১. Render Port Server Setup ---
 class SimpleHTTPRequestHandler(BaseHTTPRequestHandler):
@@ -24,28 +24,28 @@ threading.Thread(target=run_web_server, daemon=True).start()
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN", "").strip()
 GEMINI_KEY = os.environ.get("GEMINI_KEY", "").strip()
 
-# বর্তমান কার্যকরী মডেল
-MODEL_NAME = 'gemini-2.5-flash'
+# কার্যকরী মডেল
+MODEL_NAME = 'gemini-1.5-flash'
 
-client = None
 if GEMINI_KEY:
-    client = genai.Client(api_key=GEMINI_KEY)
+    genai.configure(api_key=GEMINI_KEY)
 
 # চ্যাট হিস্ট্রি ধরে রাখার জন্য ডিকশনারি
 user_chats = {}
 
 def get_or_create_chat(user_id):
-    if not client:
+    if not GEMINI_KEY:
         return None
     if user_id not in user_chats:
-        user_chats[user_id] = client.chats.create(model=MODEL_NAME)
+        model = genai.GenerativeModel(MODEL_NAME)
+        user_chats[user_id] = model.start_chat(history=[])
     return user_chats[user_id]
 
 # --- ৩. AI Response Handlers ---
 
 # (ক) টেক্সট চ্যাটের উত্তর
 async def get_personal_chat_response(user_id, prompt):
-    if not client:
+    if not GEMINI_KEY:
         return "⚠️ GEMINI_KEY পাওয়া যায়নি!"
     
     chat = get_or_create_chat(user_id)
@@ -64,22 +64,18 @@ async def get_personal_chat_response(user_id, prompt):
 
 # (খ) ভয়েস মেসেজ প্রসেস করার ফাংশন
 async def process_voice_message(user_id, voice_file_path):
-    if not client:
+    if not GEMINI_KEY:
         return "⚠️ GEMINI_KEY পাওয়া যায়নি!"
     
     try:
-        # ভয়েস ফাইলটি জেমিনাইতে আপলোড করা
-        audio_file = client.files.upload(file=voice_file_path)
-        
+        audio_file = genai.upload_file(path=voice_file_path)
         prompt = "এই ভয়েস মেসেজটিতে কি বলা হয়েছে শুনো এবং ব্যবহারকারীকে বাংলায় সুন্দর ও প্রাসঙ্গিক উত্তর দাও।"
-        response = client.models.generate_content(
-            model=MODEL_NAME,
-            contents=[audio_file, prompt]
-        )
         
-        # প্রসেস শেষে টেম্পোরারি ফাইলটি সার্ভার থেকে মুছে ফেলা
+        model = genai.GenerativeModel(MODEL_NAME)
+        response = model.generate_content([audio_file, prompt])
+        
         try:
-            client.files.delete(name=audio_file.name)
+            genai.delete_file(audio_file.name)
         except Exception:
             pass
         
@@ -89,7 +85,7 @@ async def process_voice_message(user_id, voice_file_path):
 
 # (গ) চ্যানেলের জন্য অটো মুভি/সিরিজ রিভিউ
 async def generate_channel_review(title_text):
-    if not client:
+    if not GEMINI_KEY:
         return None
     
     prompt = f"""
@@ -118,12 +114,10 @@ async def generate_channel_review(title_text):
     প্রয়োজনীয় ইমোজি ব্যবহার করবে এবং কোনো অতিরিক্ত সূচনা বা ভূমিকা ছাড়াই সরাসরি এই ফরম্যাটে আউটপুট দিবে।
     """
 
+    model = genai.GenerativeModel(MODEL_NAME)
     for attempt in range(3):
         try:
-            response = client.models.generate_content(
-                model=MODEL_NAME,
-                contents=prompt
-            )
+            response = model.generate_content(prompt)
             return response.text
         except Exception as e:
             if ("429" in str(e) or "503" in str(e)) and attempt < 2:
@@ -133,26 +127,21 @@ async def generate_channel_review(title_text):
 
 # --- ৪. Telegram Event Handlers ---
 
-# ভয়েস মেসেজ হ্যান্ডলার
 async def handle_voice_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     status_msg = await update.message.reply_text("🎙️ সোনা পাখি ভয়েসটি শুনছে...")
     
-    # টেলিগ্রাম থেকে ভয়েস ফাইল ডাউনলোড
     voice_file = await context.bot.get_file(update.message.voice.file_id)
     local_filename = f"voice_{user_id}.ogg"
     await voice_file.download_to_drive(local_filename)
     
-    # ভয়েস প্রসেস করে উত্তর আনা
     response_text = await process_voice_message(user_id, local_filename)
     
-    # লোকাল ফাইল ডিলিট
     if os.path.exists(local_filename):
         os.remove(local_filename)
         
     await status_msg.edit_text(response_text)
 
-# প্রাইভেট টেক্সট মেসেজ হ্যান্ডলার
 async def handle_private_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     user_text = update.message.text
@@ -162,7 +151,6 @@ async def handle_private_message(update: Update, context: ContextTypes.DEFAULT_T
     response_text = await get_personal_chat_response(user_id, user_text)
     await status_msg.edit_text(response_text)
 
-# চ্যানেলে পোস্ট এলে অটো রিভিউ
 async def handle_channel_post(update: Update, context: ContextTypes.DEFAULT_TYPE):
     channel_post = update.channel_post
     if not channel_post:
@@ -205,13 +193,8 @@ if __name__ == '__main__':
         app.add_handler(CommandHandler("start", start))
         app.add_handler(CommandHandler("reset", reset))
         
-        # ভয়েস মেসেজের জন্য হ্যান্ডলার
         app.add_handler(MessageHandler(filters.ChatType.PRIVATE & filters.VOICE, handle_voice_message))
-        
-        # টেক্সট মেসেজের জন্য হ্যান্ডলার
         app.add_handler(MessageHandler(filters.ChatType.PRIVATE & filters.TEXT & ~filters.COMMAND, handle_private_message))
-        
-        # চ্যানেল পোস্টের জন্য হ্যান্ডলার
         app.add_handler(MessageHandler(filters.ChatType.CHANNEL & (filters.TEXT | filters.CAPTION), handle_channel_post))
         
         print("Bot is starting...")
