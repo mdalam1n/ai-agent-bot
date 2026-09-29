@@ -25,7 +25,7 @@ TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN", "").strip()
 GEMINI_KEY = os.environ.get("GEMINI_KEY", "").strip()
 
 # কার্যকরী মডেল
-MODEL_NAME = 'gemini-3.6-flash'
+MODEL_NAME = 'gemini-3.1-flash'
 
 if GEMINI_KEY:
     genai.configure(api_key=GEMINI_KEY)
@@ -59,7 +59,7 @@ async def get_personal_chat_response(user_id, prompt):
                 if attempt < 2:
                     await asyncio.sleep(3)
                     continue
-                return "⚠️ এআই সার্ভার ব্যস্ত। কিছুক্ষণ পর আবার চেষ্টা করুন।"
+                return "⚠️ সোনা পাখি এখন ব্যস্ত। কিছুক্ষণ পর আবার চেষ্টা করুন।"
             return f"AI Error: {str(e)}"
 
 # (খ) ভয়েস মেসেজ প্রসেস করার ফাংশন
