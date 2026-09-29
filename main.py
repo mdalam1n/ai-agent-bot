@@ -4,7 +4,7 @@ import threading
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, ContextTypes
-import google.generativeai as genai
+from google import genai
 
 # --- ১. Render Port Server Setup ---
 class SimpleHTTPRequestHandler(BaseHTTPRequestHandler):
@@ -24,23 +24,25 @@ threading.Thread(target=run_web_server, daemon=True).start()
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN", "").strip()
 GEMINI_KEY = os.environ.get("GEMINI_KEY", "").strip()
 
+client = None
 if GEMINI_KEY:
-    genai.configure(api_key=GEMINI_KEY)
+    client = genai.Client(api_key=GEMINI_KEY)
 
 # চ্যাট হিস্ট্রি ধরে রাখার জন্য ডিকশনারি
 user_chats = {}
 
 def get_or_create_chat(user_id):
+    if not client:
+        return None
     if user_id not in user_chats:
-        model = genai.GenerativeModel('gemini-1.5-flash')
-        user_chats[user_id] = model.start_chat(history=[])
+        user_chats[user_id] = client.chats.create(model='gemini-2.5-flash')
     return user_chats[user_id]
 
 # --- ৩. AI Response Handlers ---
 
 # (ক) টেক্সট চ্যাটের উত্তর
 async def get_personal_chat_response(user_id, prompt):
-    if not GEMINI_KEY:
+    if not client:
         return "⚠️ GEMINI_KEY পাওয়া যায়নি!"
     
     chat = get_or_create_chat(user_id)
@@ -59,21 +61,24 @@ async def get_personal_chat_response(user_id, prompt):
 
 # (খ) ভয়েস মেসেজ প্রসেস করার ফাংশন
 async def process_voice_message(user_id, voice_file_path):
-    if not GEMINI_KEY:
+    if not client:
         return "⚠️ GEMINI_KEY পাওয়া যায়নি!"
     
     try:
         # ভয়েস ফাইলটি জেমিনাইতে আপলোড করা
-        audio_file = genai.upload_file(path=voice_file_path)
-        
-        # জেমিনাই মডেল কল করা
-        model = genai.GenerativeModel('gemini-1.5-flash')
+        audio_file = client.files.upload(file=voice_file_path)
         
         prompt = "এই ভয়েস মেসেজটিতে কি বলা হয়েছে শুনো এবং ব্যবহারকারীকে বাংলায় সুন্দর ও প্রাসঙ্গিক উত্তর দাও।"
-        response = model.generate_content([audio_file, prompt])
+        response = client.models.generate_content(
+            model='gemini-2.5-flash',
+            contents=[audio_file, prompt]
+        )
         
         # প্রসেস শেষে টেম্পোরারি ফাইলটি সার্ভার থেকে মুছে ফেলা
-        genai.delete_file(audio_file.name)
+        try:
+            client.files.delete(name=audio_file.name)
+        except Exception:
+            pass
         
         return response.text
     except Exception as e:
@@ -81,7 +86,7 @@ async def process_voice_message(user_id, voice_file_path):
 
 # (গ) চ্যানেলের জন্য অটো মুভি/সিরিজ রিভিউ
 async def generate_channel_review(title_text):
-    if not GEMINI_KEY:
+    if not client:
         return None
     
     prompt = f"""
@@ -110,10 +115,12 @@ async def generate_channel_review(title_text):
     প্রয়োজনীয় ইমোজি ব্যবহার করবে এবং কোনো অতিরিক্ত সূচনা বা ভূমিকা ছাড়াই সরাসরি এই ফরম্যাটে আউটপুট দিবে।
     """
 
-    model = genai.GenerativeModel('gemini-1.5-flash')
     for attempt in range(3):
         try:
-            response = model.generate_content(prompt)
+            response = client.models.generate_content(
+                model='gemini-2.5-flash',
+                contents=prompt
+            )
             return response.text
         except Exception as e:
             if ("429" in str(e) or "503" in str(e)) and attempt < 2:
