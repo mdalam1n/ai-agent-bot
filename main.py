@@ -24,6 +24,9 @@ threading.Thread(target=run_web_server, daemon=True).start()
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN", "").strip()
 GEMINI_KEY = os.environ.get("GEMINI_KEY", "").strip()
 
+# বর্তমান কার্যকরী মডেল
+MODEL_NAME = 'gemini-2.5-flash'
+
 client = None
 if GEMINI_KEY:
     client = genai.Client(api_key=GEMINI_KEY)
@@ -35,7 +38,7 @@ def get_or_create_chat(user_id):
     if not client:
         return None
     if user_id not in user_chats:
-        user_chats[user_id] = client.chats.create(model='gemini-2.5-flash')
+        user_chats[user_id] = client.chats.create(model=MODEL_NAME)
     return user_chats[user_id]
 
 # --- ৩. AI Response Handlers ---
@@ -70,7 +73,7 @@ async def process_voice_message(user_id, voice_file_path):
         
         prompt = "এই ভয়েস মেসেজটিতে কি বলা হয়েছে শুনো এবং ব্যবহারকারীকে বাংলায় সুন্দর ও প্রাসঙ্গিক উত্তর দাও।"
         response = client.models.generate_content(
-            model='gemini-2.5-flash',
+            model=MODEL_NAME,
             contents=[audio_file, prompt]
         )
         
@@ -118,7 +121,7 @@ async def generate_channel_review(title_text):
     for attempt in range(3):
         try:
             response = client.models.generate_content(
-                model='gemini-2.5-flash',
+                model=MODEL_NAME,
                 contents=prompt
             )
             return response.text
