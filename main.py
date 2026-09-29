@@ -25,7 +25,7 @@ TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN", "").strip()
 GEMINI_KEY = os.environ.get("GEMINI_KEY", "").strip()
 
 # কার্যকরী মডেল
-MODEL_NAME = 'gemini-1.5-flash'
+MODEL_NAME = 'gemini-3.6-flash'
 
 if GEMINI_KEY:
     genai.configure(api_key=GEMINI_KEY)
