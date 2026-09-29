@@ -38,10 +38,10 @@ def get_or_create_chat(user_id):
 
 # --- ৩. AI Response Handlers ---
 
-# (ক) পার্সোনাল চ্যাটের রেসপন্স
+# (ক) টেক্সট চ্যাটের উত্তর
 async def get_personal_chat_response(user_id, prompt):
     if not GEMINI_KEY:
-        return "⚠️ GEMINI_KEY পরিবেশক ভ্যারিয়েবলে পাওয়া যায়নি!"
+        return "⚠️ GEMINI_KEY পাওয়া যায়নি!"
     
     chat = get_or_create_chat(user_id)
 
@@ -57,7 +57,29 @@ async def get_personal_chat_response(user_id, prompt):
                 return "⚠️ এআই সার্ভার ব্যস্ত। কিছুক্ষণ পর আবার চেষ্টা করুন।"
             return f"AI Error: {str(e)}"
 
-# (খ) চ্যানেলের জন্য অটো মুভি/সিরিজ রিভিউ
+# (খ) ভয়েস মেসেজ প্রসেস করার ফাংশন
+async def process_voice_message(user_id, voice_file_path):
+    if not GEMINI_KEY:
+        return "⚠️ GEMINI_KEY পাওয়া যায়নি!"
+    
+    try:
+        # ভয়েস ফাইলটি জেমিনাইতে আপলোড করা
+        audio_file = genai.upload_file(path=voice_file_path)
+        
+        # জেমিনাই মডেল কল করা
+        model = genai.GenerativeModel('gemini-1.5-flash')
+        
+        prompt = "এই ভয়েস মেসেজটিতে কি বলা হয়েছে শুনো এবং ব্যবহারকারীকে বাংলায় সুন্দর ও প্রাসঙ্গিক উত্তর দাও।"
+        response = model.generate_content([audio_file, prompt])
+        
+        # প্রসেস শেষে টেম্পোরারি ফাইলটি সার্ভার থেকে মুছে ফেলা
+        genai.delete_file(audio_file.name)
+        
+        return response.text
+    except Exception as e:
+        return f"⚠️ ভয়েস প্রসেস করতে সমস্যা হয়েছে: {str(e)}"
+
+# (গ) চ্যানেলের জন্য অটো মুভি/সিরিজ রিভিউ
 async def generate_channel_review(title_text):
     if not GEMINI_KEY:
         return None
@@ -101,7 +123,36 @@ async def generate_channel_review(title_text):
 
 # --- ৪. Telegram Event Handlers ---
 
-# চ্যানেলে পোস্ট এলে পোস্ট অটো-এডিট করে রিভিউ বসাবে
+# ভয়েস মেসেজ হ্যান্ডলার
+async def handle_voice_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    status_msg = await update.message.reply_text("🎙️ সোনা পাখি ভয়েসটি শুনছে...")
+    
+    # টেলিগ্রাম থেকে ভয়েস ফাইল ডাউনলোড
+    voice_file = await context.bot.get_file(update.message.voice.file_id)
+    local_filename = f"voice_{user_id}.ogg"
+    await voice_file.download_to_drive(local_filename)
+    
+    # ভয়েস প্রসেস করে উত্তর আনা
+    response_text = await process_voice_message(user_id, local_filename)
+    
+    # লোকাল ফাইল ডিলিট
+    if os.path.exists(local_filename):
+        os.remove(local_filename)
+        
+    await status_msg.edit_text(response_text)
+
+# প্রাইভেট টেক্সট মেসেজ হ্যান্ডলার
+async def handle_private_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    user_text = update.message.text
+    
+    status_msg = await update.message.reply_text("🤖 সোনা পাখি চিন্তা করছে...")
+    
+    response_text = await get_personal_chat_response(user_id, user_text)
+    await status_msg.edit_text(response_text)
+
+# চ্যানেলে পোস্ট এলে অটো রিভিউ
 async def handle_channel_post(update: Update, context: ContextTypes.DEFAULT_TYPE):
     channel_post = update.channel_post
     if not channel_post:
@@ -119,23 +170,13 @@ async def handle_channel_post(update: Update, context: ContextTypes.DEFAULT_TYPE
                 await channel_post.edit_text(review_text)
             elif channel_post.caption:
                 await channel_post.edit_caption(caption=review_text[:1024])
-        except Exception as e:
+        except Exception:
             await context.bot.send_message(chat_id=channel_post.chat_id, text=review_text)
-
-# প্রাইভেট চ্যাট হ্যান্ডলার
-async def handle_private_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    user_text = update.message.text
-    
-    status_msg = await update.message.reply_text("🤖 সোনা পাখি চিন্তা করছে...")
-    
-    response_text = await get_personal_chat_response(user_id, user_text)
-    await status_msg.edit_text(response_text)
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     get_or_create_chat(user_id)
-    await update.message.reply_text("হ্যালো! আমি আপনার পার্সোনাল ও চ্যানেল অ্যাসিস্ট্যান্ট সোনা পাখি।")
+    await update.message.reply_text("হ্যালো! আমি আপনার পার্সোনাল ও চ্যানেল অ্যাসিস্ট্যান্ট সোনা পাখি। আপনি টেক্সট বা ভয়েস মেসেজ পাঠাতে পারেন!")
 
 async def reset(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
@@ -154,11 +195,14 @@ if __name__ == '__main__':
         app.add_handler(CommandHandler("start", start))
         app.add_handler(CommandHandler("reset", reset))
         
+        # ভয়েস মেসেজের জন্য হ্যান্ডলার
+        app.add_handler(MessageHandler(filters.ChatType.PRIVATE & filters.VOICE, handle_voice_message))
+        
+        # টেক্সট মেসেজের জন্য হ্যান্ডলার
+        app.add_handler(MessageHandler(filters.ChatType.PRIVATE & filters.TEXT & ~filters.COMMAND, handle_private_message))
+        
         # চ্যানেল পোস্টের জন্য হ্যান্ডলার
         app.add_handler(MessageHandler(filters.ChatType.CHANNEL & (filters.TEXT | filters.CAPTION), handle_channel_post))
-        
-        # প্রাইভেট চ্যাটের জন্য হ্যান্ডলার
-        app.add_handler(MessageHandler(filters.ChatType.PRIVATE & filters.TEXT & ~filters.COMMAND, handle_private_message))
         
         print("Bot is starting...")
         app.run_polling(allowed_updates=Update.ALL_TYPES)
