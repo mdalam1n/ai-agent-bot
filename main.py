@@ -28,7 +28,6 @@ client = None
 if GEMINI_KEY:
     client = genai.Client(api_key=GEMINI_KEY)
 
-# পার্সোনাল চ্যাট হিস্ট্রি রাখার জন্য ডিকশনারি
 user_chats = {}
 
 # --- ৩. AI Functions ---
@@ -39,7 +38,7 @@ async def get_personal_chat_response(user_id, prompt):
         return "GEMINI_KEY পাওয়া যায়নি!"
     
     if user_id not in user_chats:
-        user_chats[user_id] = client.chats.create(model='gemini-3.8-flash')
+        user_chats[user_id] = client.chats.create(model='gemini-2.5-flash')
     
     chat = user_chats[user_id]
 
@@ -48,9 +47,11 @@ async def get_personal_chat_response(user_id, prompt):
             response = chat.send_message(prompt)
             return response.text
         except Exception as e:
-            if "503" in str(e) and attempt < 2:
-                await asyncio.sleep(2)
-                continue
+            if "429" in str(e) or "503" in str(e):
+                if attempt < 2:
+                    await asyncio.sleep(3)
+                    continue
+                return "⚠️ এআই কোটা লিমিট শেষ বা সার্ভার ব্যস্ত। অনুগ্রহ করে কয়েক সেকেন্ড পর আবার চেষ্টা করুন।"
             return f"AI Error: {str(e)}"
 
 # (খ) চ্যানেলের জন্য অটো মুভি/সিরিজ রিভিউ জেনারেটর
@@ -59,7 +60,7 @@ async def generate_channel_review(title_text):
         return None
     
     prompt = f"""
-    তুমি একজন প্রফেশনাল মুভি ও সিরিজ বিশ্লেষক। নিচের নামটি বা বিবরণটি একটি মুভি বা টিভি সিরিজ:
+    তুমি একজন প্রফেশনাল মুভি ও সিরিজ বিশ্লেষক। নিচের নামটি বা ক্যাপশনটি একটি মুভি বা টিভি সিরিজ সংক্রান্ত:
     "{title_text}"
 
     তুমি বাংলা ভাষায় নিচের নির্দিষ্ট ফরম্যাট অনুযায়ী সুন্দর ও আকর্ষণীয় একটি বিবরণ তৈরি করে দাও:
@@ -87,31 +88,38 @@ async def generate_channel_review(title_text):
     for attempt in range(3):
         try:
             response = client.models.generate_content(
-                model='gemini-3.8-flash',
+                model='gemini-2.5-flash',
                 contents=prompt,
             )
             return response.text
         except Exception as e:
-            if "503" in str(e) and attempt < 2:
-                await asyncio.sleep(2)
+            if ("429" in str(e) or "503" in str(e)) and attempt < 2:
+                await asyncio.sleep(3)
                 continue
             return None
 
 # --- ৪. Telegram Handlers ---
 
-# চ্যানেলে পোস্ট হলে যা ঘটবে
+# চ্যানেলে টেক্সট, ফটো বা মিডিয়া ক্যাপশন সহ যেকোনো পোস্ট এলে তা প্রসেস করবে
 async def handle_channel_post(update: Update, context: ContextTypes.DEFAULT_TYPE):
     channel_post = update.channel_post
-    if not channel_post or not channel_post.text:
+    if not channel_post:
         return
     
-    post_text = channel_post.text.strip()
+    # টেক্সট অথবা ফটোর ক্যাপশন নেওয়া
+    post_text = channel_post.text or channel_post.caption
+    if not post_text:
+        return
+    
+    post_text = post_text.strip()
     review_text = await generate_channel_review(post_text)
     
     if review_text:
-        await channel_post.reply_text(review_text)
+        try:
+            await channel_post.reply_text(review_text)
+        except Exception as e:
+            print(f"Reply Error: {e}")
 
-# পার্সোনাল চ্যাটে মেসেজ দিলে যা ঘটবে
 async def handle_private_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     user_text = update.message.text
@@ -121,12 +129,11 @@ async def handle_private_message(update: Update, context: ContextTypes.DEFAULT_T
     response_text = await get_personal_chat_response(user_id, user_text)
     await status_msg.edit_text(response_text)
 
-# কমান্ড হ্যান্ডলার
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     if client:
-        user_chats[user_id] = client.chats.create(model='gemini-3.6-flash')
-    await update.message.reply_text("হ্যালো! আমি আপনার পার্সোনাল ও চ্যানেল অ্যাসিস্ট্যান্ট সোনা পাখি। আমি আগের কথাবাতাও মনে রাখতে পারি।")
+        user_chats[user_id] = client.chats.create(model='gemini-2.6-flash')
+    await update.message.reply_text("হ্যালো! আমি আপনার পার্সোনাল ও চ্যানেল অ্যাসিস্ট্যান্ট সোনা পাখি।")
 
 async def reset(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
@@ -141,14 +148,13 @@ if __name__ == '__main__':
     else:
         app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
         
-        # কমান্ডস
         app.add_handler(CommandHandler("start", start))
         app.add_handler(CommandHandler("reset", reset))
         
-        # চ্যানেলের পোস্ট হ্যান্ডলার
-        app.add_handler(MessageHandler(filters.ChatType.CHANNEL & filters.TEXT, handle_channel_post))
+        # চ্যানেলের টেক্সট ও মিডিয়া (ছবিসহ) পোস্ট ধরার ফিল্টার
+        app.add_handler(MessageHandler(filters.ChatType.CHANNEL & (filters.TEXT | filters.CAPTION), handle_channel_post))
         
-        # পার্সোনাল চ্যাট হ্যান্ডলার (শুধুমাত্র প্রাইভেট চ্যাটের জন্য)
+        # পার্সোনাল প্রাইভেট চ্যাট হ্যান্ডলার
         app.add_handler(MessageHandler(filters.ChatType.PRIVATE & filters.TEXT & ~filters.COMMAND, handle_private_message))
         
         print("Bot is starting...")
