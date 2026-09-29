@@ -4,7 +4,7 @@ import threading
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, ContextTypes
-from google import genai
+import google.generativeai as genai
 
 # --- ১. Render Port Server Setup ---
 class SimpleHTTPRequestHandler(BaseHTTPRequestHandler):
@@ -20,27 +20,30 @@ def run_web_server():
 
 threading.Thread(target=run_web_server, daemon=True).start()
 
-# --- ২. Environment Variables & Gemini Client ---
+# --- ২. Environment Variables & Gemini Setup ---
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN", "").strip()
 GEMINI_KEY = os.environ.get("GEMINI_KEY", "").strip()
 
-client = None
 if GEMINI_KEY:
-    client = genai.Client(api_key=GEMINI_KEY)
+    genai.configure(api_key=GEMINI_KEY)
 
+# চ্যাট হিস্ট্রি ধরে রাখার জন্য ডিকশনারি
 user_chats = {}
 
-# --- ৩. AI Functions ---
-
-# (ক) পার্সোনাল চ্যাটের উত্তর ও মেমোরি হ্যান্ডলার (gemini-3.6-flash)
-async def get_personal_chat_response(user_id, prompt):
-    if not client:
-        return "GEMINI_KEY পাওয়া যায়নি!"
-    
+def get_or_create_chat(user_id):
     if user_id not in user_chats:
-        user_chats[user_id] = client.chats.create(model='gemini-3.6-flash')
+        model = genai.GenerativeModel('gemini-1.5-flash')
+        user_chats[user_id] = model.start_chat(history=[])
+    return user_chats[user_id]
+
+# --- ৩. AI Response Handlers ---
+
+# (ক) পার্সোনাল চ্যাটের রেসপন্স
+async def get_personal_chat_response(user_id, prompt):
+    if not GEMINI_KEY:
+        return "⚠️ GEMINI_KEY পরিবেশক ভ্যারিয়েবলে পাওয়া যায়নি!"
     
-    chat = user_chats[user_id]
+    chat = get_or_create_chat(user_id)
 
     for attempt in range(3):
         try:
@@ -51,12 +54,12 @@ async def get_personal_chat_response(user_id, prompt):
                 if attempt < 2:
                     await asyncio.sleep(3)
                     continue
-                return "⚠️ এআই কোটা লিমিট শেষ বা সার্ভার ব্যস্ত। অনুগ্রহ করে কয়েক সেকেন্ড পর আবার চেষ্টা করুন।"
+                return "⚠️ এআই সার্ভার ব্যস্ত। কিছুক্ষণ পর আবার চেষ্টা করুন।"
             return f"AI Error: {str(e)}"
 
-# (খ) চ্যানেলের জন্য অটো মুভি/সিরিজ রিভিউ জেনারেটর (gemini-3.6-flash)
+# (খ) চ্যানেলের জন্য অটো মুভি/সিরিজ রিভিউ
 async def generate_channel_review(title_text):
-    if not client:
+    if not GEMINI_KEY:
         return None
     
     prompt = f"""
@@ -85,12 +88,10 @@ async def generate_channel_review(title_text):
     প্রয়োজনীয় ইমোজি ব্যবহার করবে এবং কোনো অতিরিক্ত সূচনা বা ভূমিকা ছাড়াই সরাসরি এই ফরম্যাটে আউটপুট দিবে।
     """
 
+    model = genai.GenerativeModel('gemini-1.5-flash')
     for attempt in range(3):
         try:
-            response = client.models.generate_content(
-                model='gemini-3.6-flash',
-                contents=prompt,
-            )
+            response = model.generate_content(prompt)
             return response.text
         except Exception as e:
             if ("429" in str(e) or "503" in str(e)) and attempt < 2:
@@ -98,9 +99,9 @@ async def generate_channel_review(title_text):
                 continue
             return None
 
-# --- ৪. Telegram Handlers ---
+# --- ৪. Telegram Event Handlers ---
 
-# চ্যানেলে পোস্ট এলে পোস্টটি অটোমেটিক এডিট করে সম্পূর্ণ রিভিউ দিয়ে দেবে
+# চ্যানেলে পোস্ট এলে পোস্ট অটো-এডিট করে রিভিউ বসাবে
 async def handle_channel_post(update: Update, context: ContextTypes.DEFAULT_TYPE):
     channel_post = update.channel_post
     if not channel_post:
@@ -110,21 +111,18 @@ async def handle_channel_post(update: Update, context: ContextTypes.DEFAULT_TYPE
     if not post_text:
         return
     
-    post_text = post_text.strip()
-    review_text = await generate_channel_review(post_text)
+    review_text = await generate_channel_review(post_text.strip())
     
     if review_text:
         try:
-            # যদি টেক্সট পোস্ট হয়, পোস্টটি এডিট করে পুরো রিভিউ বসিয়ে দেবে
             if channel_post.text:
                 await channel_post.edit_text(review_text)
-            # যদি ছবি বা ক্যাপশন পোস্ট হয়
             elif channel_post.caption:
                 await channel_post.edit_caption(caption=review_text[:1024])
-        except Exception:
-            # কোনো কারণে এডিট না হলে নতুন মেসেজ হিসেবে পাঠিয়ে দেবে
+        except Exception as e:
             await context.bot.send_message(chat_id=channel_post.chat_id, text=review_text)
 
+# প্রাইভেট চ্যাট হ্যান্ডলার
 async def handle_private_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     user_text = update.message.text
@@ -136,14 +134,14 @@ async def handle_private_message(update: Update, context: ContextTypes.DEFAULT_T
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
-    if client:
-        user_chats[user_id] = client.chats.create(model='gemini-3.6-flash')
+    get_or_create_chat(user_id)
     await update.message.reply_text("হ্যালো! আমি আপনার পার্সোনাল ও চ্যানেল অ্যাসিস্ট্যান্ট সোনা পাখি।")
 
 async def reset(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
-    if client:
-        user_chats[user_id] = client.chats.create(model='gemini-3.6-flash')
+    if user_id in user_chats:
+        del user_chats[user_id]
+    get_or_create_chat(user_id)
     await update.message.reply_text("🔄 আমাদের আগের সব মেমোরি রিসেট করা হয়েছে!")
 
 # --- ৫. Main Execution ---
@@ -156,11 +154,11 @@ if __name__ == '__main__':
         app.add_handler(CommandHandler("start", start))
         app.add_handler(CommandHandler("reset", reset))
         
-        # চ্যানেলের পোস্ট হ্যান্ডলার
+        # চ্যানেল পোস্টের জন্য হ্যান্ডলার
         app.add_handler(MessageHandler(filters.ChatType.CHANNEL & (filters.TEXT | filters.CAPTION), handle_channel_post))
         
-        # প্রাইভেট চ্যাট হ্যান্ডলার
+        # প্রাইভেট চ্যাটের জন্য হ্যান্ডলার
         app.add_handler(MessageHandler(filters.ChatType.PRIVATE & filters.TEXT & ~filters.COMMAND, handle_private_message))
         
         print("Bot is starting...")
-        app.run_polling()
+        app.run_polling(allowed_updates=Update.ALL_TYPES)
